@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TicTacToe</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        #backIcon {
+            position: fixed;
+            top: 15px;
+            left: 15px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            z-index: 1000;
+            color: #eee;
+            background: #16213e;
+            padding: 8px 14px;
+            border-radius: 8px;
+            transition: background 0.2s;
+            user-select: none;
+        }
+        #backIcon:hover {
+            background: #0f3460;
+        }
+
+      .score-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 25px;
+            color: #3d7dff;
+            width: 100%;
+            max-width: 400px;
+        }
+
+      .settings {
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 20px;
+        }
+
+      .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 14px 0;
+            opacity: 1;
+            transition: opacity 0.2s;
+        }
+
+      .setting-row.disabled {
+            opacity: 0.4;
+            pointer-events: none;
+        }
+
+      .setting-row label {
+            width: 110px;
+            text-align: left;
+            color: #ccc;
+            font-size: 15px;
+        }
+
+      .cycle-btn {
+            background: #16213e;
+            border: 2px solid #3d7dff;
+            color: white;
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 15px;
+            transition: background 0.2s;
+            width: 150px;
+            text-align: center;
+        }
+
+      .cycle-btn:hover {
+            background: #0f3460;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="backIcon">⟵ Menü</div>
+
+    <h1>TicTacToe</h1>
+
+    <div class="score-header">
+        <span id="scoreX">X: 0</span>
+        <span id="scoreDraw">Unentsch: 0</span>
+        <span id="scoreO">O: 0</span>
+    </div>
+
+    <div class="settings">
+        <div class="setting-row">
+            <label>Spieler:</label>
+            <button class="cycle-btn" id="btnPlayers"><span id="valPlayers">2 Spieler</span></button>
+        </div>
+        <div class="setting-row">
+            <label>Runden:</label>
+            <button class="cycle-btn" id="btnRounds"><span id="valRounds">1</span></button>
+        </div>
+        <div class="setting-row" id="rowMode">
+            <label>Modus:</label>
+            <button class="cycle-btn" id="btnMode"><span id="valMode">Verkürzt</span></button>
+        </div>
+        <div class="setting-row" id="rowDifficulty">
+            <label>Schwierig:</label>
+            <button class="cycle-btn" id="btnDifficulty"><span id="valDifficulty">Mittel</span></button>
+        </div>
+        <div class="setting-row" id="rowAdapt">
+            <label>Adaption:</label>
+            <button class="cycle-btn" id="btnAdapt"><span id="valAdapt">Normal</span></button>
+        </div>
+    </div>
+
+    <div id="board" class="board"></div>
+    <div id="status"></div>
+    <button id="reset">Neu starten</button>
+
+    <footer class="footer">TicTacToe v1.0 | by Andreas Rollinger</footer>
+
+    <script src="game.js"></script> <!-- BLEIBT SO -->
+    <script>
+        const playersOptions = ["1 Spieler", "2 Spieler"];
+        const roundsOptions = [1, 3, 5, 7];
+        const modeOptions = ["Verkürzt", "Komplette Runden", "Turnier"];
+        const difficultyOptions = ["Leicht", "Mittel", "Schwer", "Perfekt", "Adaptiv"];
+        const adaptOptions = ["Langsam", "Normal", "Schnell", "Sehr Schnell"];
+
+        let playersIdx = 1, roundsIdx = 0, modeIdx = 0, diffIdx = 1, adaptIdx = 1;
+
+        function updateUI() {
+            document.getElementById('valPlayers').textContent = playersOptions[playersIdx];
+            document.getElementById('valRounds').textContent = roundsOptions[roundsIdx];
+            document.getElementById('valMode').textContent = modeOptions[modeIdx];
+            document.getElementById('valDifficulty').textContent = difficultyOptions[diffIdx];
+            document.getElementById('valAdapt').textContent = adaptOptions[adaptIdx];
+
+            const modeEnabled = roundsOptions[roundsIdx] > 1;
+            const diffEnabled = playersIdx === 0;
+            const adaptEnabled = (playersIdx === 0 && diffIdx === 4);
+
+            document.getElementById('rowMode').classList.toggle('disabled',!modeEnabled);
+            document.getElementById('rowDifficulty').classList.toggle('disabled',!diffEnabled);
+            document.getElementById('rowAdapt').classList.toggle('disabled',!adaptEnabled);
+
+            window.currentPlayers = playersIdx === 0? 'bot' : 'human';
+            window.currentRounds = roundsOptions[roundsIdx];
+            window.currentMode = ['short', 'full', 'tournament'][modeIdx];
+            window.currentDifficulty = diffIdx + 1;
+            window.currentAdapt = ['slow', 'normal', 'fast', 'veryfast'][adaptIdx];
+        }
+
+        function cycle(arr, idx) { return (idx + 1) % arr.length; }
+
+        document.getElementById('btnPlayers').onclick = () => { playersIdx = cycle(playersOptions, playersIdx); updateUI(); };
+        document.getElementById('btnRounds').onclick = () => { roundsIdx = cycle(roundsOptions, roundsIdx); updateUI(); };
+        document.getElementById('btnMode').onclick = () => { modeIdx = cycle(modeOptions, modeIdx); updateUI(); };
+        document.getElementById('btnDifficulty').onclick = () => { diffIdx = cycle(difficultyOptions, diffIdx); updateUI(); };
+        document.getElementById('btnAdapt').onclick = () => { adaptIdx = cycle(adaptOptions, adaptIdx); updateUI(); };
+
+        window.updateScore = function(x, draw, o) {
+            document.getElementById('scoreX').textContent = `X: ${x}`;
+            document.getElementById('scoreDraw').textContent = `Unentsch: ${draw}`;
+            document.getElementById('scoreO').textContent = `O: ${o}`;
+        }
+
+        document.getElementById("backIcon").addEventListener("click", () => {
+            window.location.href = "../index.html?menu=1";
+        });
+
+        updateUI();
+        if(window.resetGame) window.resetGame(true);
+    </script>
+</body>
+</html>
