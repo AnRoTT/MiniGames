@@ -7,7 +7,7 @@ const winnerBanner = document.getElementById("winnerBanner");
 const clickSound = new Audio("Click.mp3");
 clickSound.volume = 0.4;
 
-function playClick(volume = 0.4) { // NEU: Lautstärke Parameter
+function playClick(volume = 0.4) {
     clickSound.volume = volume;
     clickSound.currentTime = 0;
     clickSound.play().catch(() => {});
@@ -17,36 +17,40 @@ let cells = Array(9).fill(null);
 let current = "X";
 let gameOver = false;
 
-// NEU: Wir lesen jetzt aus den globalen Variablen aus dem HTML
-let mode = "human"; // "human" oder "bot"
-let botLevel = 1; // 1-5
-let totalRounds = 1; // 1,3,5,7
+let mode = "human";
+let botLevel = 1;
+let totalRounds = 1;
 let scoreX = 0;
 let scoreO = 0;
-let scoreDraw = 0; // NEU
+let scoreDraw = 0;
 let roundsPlayed = 0;
 let startingPlayer = "X";
 let winRowGlobal = null;
 
-/* ⭐ NEU: Flags für "Neue Runde" */
 let matchOver = false;
 let waitingForNextRound = false;
 
-/* ⭐ Adaptive KI Skill-Wert */
 let playerSkill = 50;
-let adaptSpeed = "normal"; // slow, normal, fast, veryfast
+let adaptSpeed = "normal";
 
-/* --- Rundenmodus Variable --- */
-let roundMode = "short"; // "short", "full", "tournament"
-let isInitialized = false; // GANZ OBEN ZU DEN ANDEREN VARS
+let roundMode = "short";
+let isInitialized = false;
 
-/* NEU: Variablen aus den Cycle-Buttons holen */
 function readSettings() {
     mode = window.currentPlayers;
     botLevel = window.currentDifficulty;
     totalRounds = window.currentRounds;
     roundMode = window.currentMode;
     adaptSpeed = window.currentAdapt;
+}
+
+/* NEU: Array mischen */
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
 }
 
 /* Render Board */
@@ -65,7 +69,7 @@ function render() {
         if (winRowGlobal && winRowGlobal.includes(i)) {
             cell.classList.add("win");
         }
-        if (!isLocked) { // NUR dann klickbar machen
+        if (!isLocked) {
             cell.onclick = () => move(i);
             cell.style.cursor = "pointer";
         } else {
@@ -230,11 +234,11 @@ function pickFromBest(moves, topN = 2) {
     return moves[Math.floor(Math.random() * count)];
 }
 
-/* NEU: Gibt alle gleich guten Minimax Züge zurück */
+/* NEU: Gibt alle gleich guten Minimax Züge zurück - GEMISCHT */
 function getBestMovesFromMinimax(board, player) {
     let bestScore = -Infinity;
     let bestMoves = [];
-    const free = board.map((v, i) => v === null? i : null).filter(v => v!== null);
+    const free = shuffleArray(board.map((v, i) => v === null? i : null).filter(v => v!== null));
 
     for (let i of free) {
         const newBoard = board.slice();
@@ -252,17 +256,25 @@ function getBestMovesFromMinimax(board, player) {
     return bestMoves;
 }
 
-/* Menschliche Zug-Priorität: Mitte > Ecken > Kanten */
+/* GEÄNDERT: Menschliche Zug-Priorität: Mitte > Ecken > Kanten - JETZT GEMISCHT + 20% Kante statt Ecke */
 function getHumanPriorityMoves() {
     const free = getFreeCells();
-    const center = [4];
-    const corners = [0,2,6,8];
-    const edges = [1,3,5,7];
+    const corners = shuffleArray([0,2,6,8].filter(i => free.includes(i)));
+    const edges = shuffleArray([1,3,5,7].filter(i => free.includes(i)));
 
     let priority = [];
     if(free.includes(4)) priority.push(4);
-    priority.push(...free.filter(i => corners.includes(i)));
-    priority.push(...free.filter(i => edges.includes(i)));
+
+    // 80% Chance: klassisch Ecken vor Kanten
+    // 20% Chance: "Druckfehler" - Kanten vor Ecken
+    if(Math.random() < 0.8) {
+        priority.push(...corners);
+        priority.push(...edges);
+    } else {
+        priority.push(...edges);
+        priority.push(...corners);
+    }
+
     return priority;
 }
 
@@ -284,7 +296,7 @@ function botMedium() {
     const block = findCritical("X");
     if(block!== null && Math.random() < 0.6) return block;
 
-    return pickFromBest(getHumanPriorityMoves(), 2) || botRandom(); // GEÄNDERT
+    return pickFromBest(getHumanPriorityMoves(), 2) || botRandom();
 }
 
 /* Bot Level 3: Gut aber macht Denkfehler - JETZT DYNAMISCH */
@@ -299,21 +311,21 @@ function botHard() {
         return pickFromBest(getHumanPriorityMoves(), 3) || botRandom();
     }
 
-    return pickFromBest(getHumanPriorityMoves(), 2) || botRandom(); // GEÄNDERT
+    return pickFromBest(getHumanPriorityMoves(), 2) || botRandom();
 }
 
 /* Bot Level 4: Fast perfekt - JETZT DYNAMISCH + PATZER */
 function botPerfect() {
     const win = findCritical("O");
-    if(win!== null) return win; // 1. Gewinnen IMMER
+    if(win!== null) return win;
 
     const block = findCritical("X");
-    if(block!== null && Math.random() < 0.95) return block; // 2. Blocken 95%
+    if(block!== null && Math.random() < 0.95) return block;
 
     const bestMoves = getBestMovesFromMinimax(cells, "O");
-    let move = pickFromBest(bestMoves, bestMoves.length); // 3. Zufall aus allen besten
+    let move = pickFromBest(bestMoves, bestMoves.length);
 
-    // 4. 10% Chance auf kleinen Patzer
+    // 10% Chance auf kleinen Patzer
     if(Math.random() < 0.1) {
         move = pickFromBest(getHumanPriorityMoves(), 3) || move;
     }
@@ -429,7 +441,6 @@ function endRound(winner, winRow = null) {
 
     startingPlayer = startingPlayer === "X"? "O" : "X";
 
-    // ⭐ Skill anpassen - jetzt mit adapt() für Sehr Schnell
     if (winner!== "draw") {
         if (winner === "X") playerSkill += adapt(10);
         if (winner === "O") playerSkill -= adapt(10);
@@ -438,7 +449,6 @@ function endRound(winner, winRow = null) {
     }
     playerSkill = Math.max(0, Math.min(100, playerSkill));
 
-    /* ⭐ FIX: Adaptive Status vorbereiten */
     let adaptiveStatus = "";
     if (botLevel === 5) {
         const newAdaptiveLevel = getAdaptiveLevel();
@@ -486,30 +496,21 @@ function endRound(winner, winRow = null) {
 
     matchOver = matchFinished;
 
-    // ⭐ HIER wird adaptiveStatus NICHT mehr überschrieben
 if(matchFinished){
     let parts = [];
-
-    // 1. Bei adaptivem Bot Info drin lassen
     if (botLevel === 5) {
         const newAdaptiveLevel = getAdaptiveLevel();
         parts.push(`Adaptiver Bot (Neu: ${getAdaptiveLevelName(newAdaptiveLevel)}) | Skill: ${playerSkill.toFixed(0)}`);
     } else {
         parts.push(`Match beendet`);
     }
-
-    // 2. Klicke Text dran
     status.textContent = parts.join(" | ") + " | Klicke 'Neues Spiel'";
-
-    // 3. Nur oben ins Banner
     let winnerText = "";
     if (scoreX > scoreO) winnerText = "Gesamtsieger: X";
     else if (scoreO > scoreX) winnerText = "Gesamtsieger: O";
     else winnerText = "Gesamt: Unentschieden!";
-
     winnerBanner.textContent = winnerText;
     winnerBanner.classList.add("show");
-
     reset.textContent = "Neues Spiel";
 } else {
     status.textContent = adaptiveStatus + message + " | Klicke 'Neue Runde'";
@@ -526,14 +527,13 @@ function resetGame(full = true) {
     waitingForNextRound = false;
     winRowGlobal = null;
 
-    // NUR entsperren wenn es nicht der erste Aufruf ist
     if(isInitialized) {
         gameOver = false;
         board.classList.remove('locked');
     }
 
     if (full) {
-		status.classList.remove("winner"); // ⭐ Highlight zurücksetzen
+		status.classList.remove("winner");
         matchOver = false;
         startingPlayer = "X";
         scoreX = 0;
@@ -558,11 +558,11 @@ function resetGame(full = true) {
 /* NEU: Reset Button Logik */
 reset.onclick = () => {
     if(matchOver) {
-        resetGame(true); // komplett neu
+        resetGame(true);
     } else if(waitingForNextRound) {
-        resetGame(false); // nächste Runde
+        resetGame(false);
     } else {
-        resetGame(true); // ERSTER START
+        resetGame(true);
     }
 };
 
@@ -570,19 +570,19 @@ reset.onclick = () => {
 function init() {
     readSettings();
     cells = Array(9).fill(null);
-    gameOver = true; // Board sperren
-    board.classList.add('locked'); // Grau
+    gameOver = true;
+    board.classList.add('locked');
     matchOver = false;
     status.textContent = "Einstellungen wählen und 'Neues Spiel' klicken";
     reset.textContent = "Neues Spiel";
-    render(); // render sieht jetzt locked und setzt keine onclick
-    isInitialized = true; // NEU: ab jetzt darf man starten
+    render();
+    isInitialized = true;
 }
 
 /* ⭐ NEU: Sound für alle Cycle-Buttons */
 document.querySelectorAll('.cycle-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-        playClick(0.2); // leiser für UI
+        playClick(0.2);
     });
 });
 
@@ -602,4 +602,4 @@ if(backBtn) {
     });
 }
 
-init(); // MUSS LETZTE ZEILE SEIN
+init();
