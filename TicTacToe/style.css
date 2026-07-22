@@ -352,3 +352,12 @@ h1 {
         font-size: 12px;
     }
 }
+/* Board gesperrt */
+.board.locked {
+    pointer-events: none !important;
+    opacity: 0.5;
+}
+.board.locked .cell {
+    pointer-events: none !important;
+    cursor: default !important;
+}

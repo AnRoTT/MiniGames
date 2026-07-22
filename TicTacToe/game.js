@@ -3,7 +3,7 @@ const status = document.getElementById("status");
 const reset = document.getElementById("reset");
 
 /* --- Sound System --- */
-const clickSound = new Audio("sounds/Click.mp3");
+const clickSound = new Audio("Click.mp3");
 clickSound.volume = 0.4;
 
 function playClick() {
@@ -36,6 +36,7 @@ let adaptSpeed = "normal"; // slow, normal, fast, veryfast
 
 /* --- Rundenmodus Variable --- */
 let roundMode = "short"; // "short", "full", "tournament"
+let isInitialized = false; // GANZ OBEN ZU DEN ANDEREN VARS
 
 /* NEU: Variablen aus den Cycle-Buttons holen */
 function readSettings() {
@@ -53,13 +54,21 @@ function render() {
         const cell = document.createElement("div");
         cell.className = "cell";
         cell.innerHTML = value? `<span class="mark ${value}">${value}</span>` : "";
-        if (!value &&!gameOver &&!waitingForNextRound) {
+        
+        const isLocked = gameOver || waitingForNextRound || board.classList.contains('locked');
+        
+        if (!value && !isLocked) {
             cell.dataset.ghost = current;
         }
         if (winRowGlobal && winRowGlobal.includes(i)) {
             cell.classList.add("win");
         }
-        cell.onclick = () => move(i);
+        if (!isLocked) { // NUR dann klickbar machen
+            cell.onclick = () => move(i);
+            cell.style.cursor = "pointer";
+        } else {
+            cell.style.cursor = "default";
+        }
         board.appendChild(cell);
     });
 }
@@ -93,7 +102,7 @@ function adapt(value) {
         case "slow": return value * 0.5;
         case "normal": return value;
         case "fast": return value * 1.5;
-        case "veryfast": return value * 2.2;
+        case "veryfast": return value * 3;
     }
 }
 
@@ -311,9 +320,9 @@ function endRound(winner, winRow = null) {
 
     if (winner === "X") scoreX++;
     if (winner === "O") scoreO++;
-    if (winner === "draw") scoreDraw++; // NEU
+    if (winner === "draw") scoreDraw++;
     roundsPlayed++;
-    updateScore(scoreX, scoreDraw, scoreO); // GEÄNDERT
+    updateScore(scoreX, scoreDraw, scoreO);
 
     if (mode === "bot") {
         if (winner === "O") shakeBoard();
@@ -322,13 +331,21 @@ function endRound(winner, winRow = null) {
 
     startingPlayer = startingPlayer === "X"? "O" : "X";
 
-    if (winner!== "draw") {
-        if (winner === "X") playerSkill += 10;
-        if (winner === "O") playerSkill -= 10;
+    // ⭐ Skill anpassen - jetzt mit adapt() für Sehr Schnell
+    if (winner !== "draw") {
+        if (winner === "X") playerSkill += adapt(10);
+        if (winner === "O") playerSkill -= adapt(10);
     } else {
         playerSkill += adapt(2);
     }
     playerSkill = Math.max(0, Math.min(100, playerSkill));
+
+    /* ⭐ FIX: Adaptive Status vorbereiten */
+    let adaptiveStatus = "";
+    if (botLevel === 5) {
+        const newAdaptiveLevel = getAdaptiveLevel();
+        adaptiveStatus = `Adaptiver Bot (aktuell: ${getAdaptiveLevelName(newAdaptiveLevel)}) | Skill: ${playerSkill.toFixed(0)} | `;
+    }
 
     let message = "";
     let matchFinished = false;
@@ -371,35 +388,41 @@ function endRound(winner, winRow = null) {
 
     matchOver = matchFinished;
 
-    if(matchFinished){
-        status.textContent = message + " | Klicke 'Match neustarten'";
-        reset.textContent = "Match neustarten";
-    } else {
-        status.textContent = message + " | Klicke 'Neue Runde'";
-        reset.textContent = "Neue Runde";
-    }
+    // ⭐ HIER wird adaptiveStatus NICHT mehr überschrieben
+if(matchFinished){
+    status.textContent = adaptiveStatus + message + " | Klicke 'Neues Spiel'";
+    reset.textContent = "Neues Spiel"; // statt "Match neustarten"
+} else {
+    status.textContent = adaptiveStatus + message + " | Klicke 'Neue Runde'";
+    reset.textContent = "Neue Runde";
+}
 }
 
 /* Reset - ÜBERARBEITET */
 function resetGame(full = true) {
-    readSettings(); // NEU: Settings vor jedem Start neu einlesen
+    readSettings(); 
     cells = Array(9).fill(null);
-    gameOver = false;
     waitingForNextRound = false;
     winRowGlobal = null;
 
+    // NUR entsperren wenn es nicht der erste Aufruf ist
+    if(isInitialized) {
+        gameOver = false; 
+        board.classList.remove('locked');
+    }
+    
     if (full) {
         matchOver = false;
         startingPlayer = "X";
         scoreX = 0;
         scoreO = 0;
-        scoreDraw = 0; // NEU
+        scoreDraw = 0;
         roundsPlayed = 0;
-        updateScore(scoreX, scoreDraw, scoreO); // GEÄNDERT
+        updateScore(scoreX, scoreDraw, scoreO);
     }
 
     current = startingPlayer;
-    status.textContent = `Runde ${roundsPlayed+1}/${totalRounds} - ${current} beginnt`;
+    status.textContent = full ? `Runde 1/${totalRounds} - ${current} beginnt` : `Runde ${roundsPlayed+1}/${totalRounds} - ${current} beginnt`;
     reset.textContent = "Neu starten";
     render();
 
@@ -410,13 +433,26 @@ function resetGame(full = true) {
 
 /* NEU: Reset Button Logik */
 reset.onclick = () => {
-    if(waitingForNextRound) {
-        resetGame(false);
+    if(matchOver) {
+        resetGame(true); // komplett neu
+    } else if(waitingForNextRound) {
+        resetGame(false); // nächste Runde
     } else {
-        resetGame(true);
+        resetGame(true); // ERSTER START
     }
 };
 
-/* initial start */
-readSettings(); // NEU
-resetGame(true);
+/* initial start - Board beim Start sperren */
+function init() {
+    readSettings(); 
+    cells = Array(9).fill(null);
+    gameOver = true; // Board sperren
+    board.classList.add('locked'); // Grau
+    matchOver = false;
+    status.textContent = "Einstellungen wählen und 'Neues Spiel' klicken";
+    reset.textContent = "Neues Spiel";
+    render(); // render sieht jetzt locked und setzt keine onclick
+    isInitialized = true; // NEU: ab jetzt darf man starten
+}
+
+init(); // MUSS LETZTE ZEILE SEIN
