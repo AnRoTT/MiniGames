@@ -1,12 +1,14 @@
 const board = document.getElementById("board");
 const status = document.getElementById("status");
 const reset = document.getElementById("reset");
+const winnerBanner = document.getElementById("winnerBanner");
 
 /* --- Sound System --- */
 const clickSound = new Audio("Click.mp3");
 clickSound.volume = 0.4;
 
-function playClick() {
+function playClick(volume = 0.4) { // NEU: Lautstärke Parameter
+    clickSound.volume = volume;
     clickSound.currentTime = 0;
     clickSound.play().catch(() => {});
 }
@@ -107,7 +109,7 @@ function adapt(value) {
 }
 
 function getAdaptiveLevelName(level) {
-    return ["Leicht", "Mittel", "Schwer", "Perfekt"][level - 1];
+    return ["Anfänger", "Hobbyspieler", "Vereinsspieler", "Meister"][level - 1];
 }
 
 /* ⭐ Fehlerquote */
@@ -177,24 +179,22 @@ function move(i) {
     }
 }
 
-/* Bot Move */
+/* Bot Move - MENSCHLICH */
 function botMove() {
     if(waitingForNextRound) return;
     let moveIndex;
+
     if (botLevel === 5) {
         const adaptiveLevel = getAdaptiveLevel();
-        status.textContent = `Adaptiver Bot (aktuell: ${getAdaptiveLevelName(adaptiveLevel)})`;
-        if (adaptiveLevel === 1) moveIndex = botRandom();
-        if (adaptiveLevel === 2) moveIndex = botMedium();
-        if (adaptiveLevel === 3) moveIndex = botHard();
-        if (adaptiveLevel === 4) moveIndex = botPerfect();
-        moveIndex = applyAdaptiveError(moveIndex);
+        status.textContent = `Adaptiver Bot (aktuell: ${getAdaptiveLevelName(adaptiveLevel)}) | Skill: ${playerSkill.toFixed(0)}`;
+        moveIndex = botAdaptive();
     } else {
         if (botLevel === 1) moveIndex = botRandom();
         if (botLevel === 2) moveIndex = botMedium();
         if (botLevel === 3) moveIndex = botHard();
         if (botLevel === 4) moveIndex = botPerfect();
     }
+
     cells[moveIndex] = "O";
     playClick();
     if (adaptSpeed === "veryfast") {
@@ -216,24 +216,84 @@ function botMove() {
     render();
 }
 
-/* Bot Logic */
+/* === MENSCHLICHER BOT === */
+
+/* Hilfsfunktion: Freie Felder */
+function getFreeCells() {
+    return cells.map((v, i) => v === null? i : null).filter(v => v!== null);
+}
+
+/* Menschliche Zug-Priorität: Mitte > Ecken > Kanten */
+function getHumanPriorityMoves() {
+    const free = getFreeCells();
+    const center = [4];
+    const corners = [0,2,6,8];
+    const edges = [1,3,5,7];
+
+    let priority = [];
+    if(free.includes(4)) priority.push(4);
+    priority.push(...free.filter(i => corners.includes(i)));
+    priority.push(...free.filter(i => edges.includes(i)));
+    return priority;
+}
+
+/* Bot Level 1: Zufall + manchmal dumm */
 function botRandom() {
-    const free = cells.map((v, i) => v === null? i : null).filter(v => v!== null);
+    const free = getFreeCells();
+    if(Math.random() < 0.2) {
+        const badMoves = free.filter(i =>![0,2,4,6,8].includes(i));
+        if(badMoves.length > 0) return badMoves[Math.floor(Math.random() * badMoves.length)];
+    }
     return free[Math.floor(Math.random() * free.length)];
 }
-function botMedium() { return botBlockOrRandom(); }
-function botHard() { return botWinOrBlockOrRandom(); }
-function botPerfect() { return minimax(cells, "O").index; }
-function botBlockOrRandom() {
-    const block = findCritical("X");
-    return block!== null? block : botRandom();
-}
-function botWinOrBlockOrRandom() {
+
+/* Bot Level 2: Blockt manchmal, spielt oft "sicher" */
+function botMedium() {
     const win = findCritical("O");
-    if (win!== null) return win;
+    if(win!== null && Math.random() < 0.7) return win;
+
     const block = findCritical("X");
-    return block!== null? block : botRandom();
+    if(block!== null && Math.random() < 0.6) return block;
+
+    return getHumanPriorityMoves()[0] || botRandom();
 }
+
+/* Bot Level 3: Gut aber macht Denkfehler */
+function botHard() {
+    const win = findCritical("O");
+    if(win!== null) return win;
+
+    const block = findCritical("X");
+    if(block!== null && Math.random() < 0.9) return block;
+
+    if(Math.random() < 0.15) {
+        return getHumanPriorityMoves()[Math.floor(Math.random() * 3)] || botRandom();
+    }
+
+    return getHumanPriorityMoves()[0] || botRandom();
+}
+
+/* Bot Level 4: Fast perfekt */
+function botPerfect() {
+    const win = findCritical("O");
+    if(win!== null) return win;
+    const block = findCritical("X");
+    if(block!== null) return block;
+    return minimax(cells, "O").index;
+}
+
+/* Bot Level 5: Adaptive */
+function botAdaptive() {
+    const adaptiveLevel = getAdaptiveLevel();
+    let moveIndex;
+    if (adaptiveLevel === 1) moveIndex = botRandom();
+    if (adaptiveLevel === 2) moveIndex = botMedium();
+    if (adaptiveLevel === 3) moveIndex = botHard();
+    if (adaptiveLevel === 4) moveIndex = botPerfect();
+    return applyAdaptiveError(moveIndex);
+}
+
+/* findCritical bleibt gleich */
 function findCritical(player) {
     const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
     for (let w of wins) {
@@ -246,7 +306,7 @@ function findCritical(player) {
     return null;
 }
 
-/* Minimax */
+/* Minimax bleibt gleich */
 function minimax(boardState, player) {
     const free = boardState.map((v, i) => v === null? i : null).filter(v => v!== null);
     if (checkWin("X", boardState)) return { score: -10 };
@@ -344,7 +404,7 @@ function endRound(winner, winRow = null) {
     let adaptiveStatus = "";
     if (botLevel === 5) {
         const newAdaptiveLevel = getAdaptiveLevel();
-        adaptiveStatus = `Adaptiver Bot (aktuell: ${getAdaptiveLevelName(newAdaptiveLevel)}) | Skill: ${playerSkill.toFixed(0)} | `;
+        adaptiveStatus = `Adaptiver Bot (Neu: ${getAdaptiveLevelName(newAdaptiveLevel)}) | Skill: ${playerSkill.toFixed(0)} `;
     }
 
     let message = "";
@@ -390,10 +450,33 @@ function endRound(winner, winRow = null) {
 
     // ⭐ HIER wird adaptiveStatus NICHT mehr überschrieben
 if(matchFinished){
-    status.textContent = adaptiveStatus + message + " | Klicke 'Neues Spiel'";
-    reset.textContent = "Neues Spiel"; // statt "Match neustarten"
+    let parts = [];
+    
+    // 1. Bei adaptivem Bot Info drin lassen
+    if (botLevel === 5) {
+        const newAdaptiveLevel = getAdaptiveLevel();
+        parts.push(`Adaptiver Bot (Neu: ${getAdaptiveLevelName(newAdaptiveLevel)}) | Skill: ${playerSkill.toFixed(0)}`);
+    } else {
+        parts.push(`Match beendet`);
+    }
+    
+    // 2. Klicke Text dran
+    status.textContent = parts.join(" | ") + " | Klicke 'Neues Spiel'";
+    
+    // 3. Nur oben ins Banner
+    let winnerText = "";
+    if (scoreX > scoreO) winnerText = "Gesamtsieger: X";
+    else if (scoreO > scoreX) winnerText = "Gesamtsieger: O";
+    else winnerText = "Gesamt: Unentschieden!";
+    
+    winnerBanner.textContent = winnerText;
+    winnerBanner.classList.add("show");
+    
+    reset.textContent = "Neues Spiel";
 } else {
     status.textContent = adaptiveStatus + message + " | Klicke 'Neue Runde'";
+    winnerBanner.classList.remove("show");
+    winnerBanner.textContent = "";
     reset.textContent = "Neue Runde";
 }
 }
@@ -412,6 +495,7 @@ function resetGame(full = true) {
     }
     
     if (full) {
+		status.classList.remove("winner"); // ⭐ Highlight zurücksetzen
         matchOver = false;
         startingPlayer = "X";
         scoreX = 0;
@@ -419,6 +503,8 @@ function resetGame(full = true) {
         scoreDraw = 0;
         roundsPlayed = 0;
         updateScore(scoreX, scoreDraw, scoreO);
+		winnerBanner.classList.remove("show");
+        winnerBanner.textContent = "";
     }
 
     current = startingPlayer;
@@ -453,6 +539,29 @@ function init() {
     reset.textContent = "Neues Spiel";
     render(); // render sieht jetzt locked und setzt keine onclick
     isInitialized = true; // NEU: ab jetzt darf man starten
+}
+
+/* ⭐ NEU: Sound für alle Cycle-Buttons */
+document.querySelectorAll('.cycle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        playClick(0.2); // leiser für UI
+    });
+});
+
+/* ⭐ NEU: Sound für Reset Button */
+reset.addEventListener('click', () => {
+    playClick(0.2);
+});
+
+/* ⭐ NEU: Sound für Back Button */
+const backBtn = document.getElementById("backIcon");
+if(backBtn) {
+    backBtn.addEventListener('click', () => {
+        playClick(0.2);
+        setTimeout(() => {
+            window.location.href = "../index.html?menu=1";
+        }, 100);
+    });
 }
 
 init(); // MUSS LETZTE ZEILE SEIN
