@@ -108,7 +108,7 @@ function adapt(value) {
         case "slow": return value * 0.5;
         case "normal": return value;
         case "fast": return value * 1.5;
-        case "veryfast": return value * 2.5;
+        case "veryfast": return value * 2.0;
     }
 }
 
