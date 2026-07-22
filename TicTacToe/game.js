@@ -56,10 +56,10 @@ function render() {
         const cell = document.createElement("div");
         cell.className = "cell";
         cell.innerHTML = value? `<span class="mark ${value}">${value}</span>` : "";
-        
+
         const isLocked = gameOver || waitingForNextRound || board.classList.contains('locked');
-        
-        if (!value && !isLocked) {
+
+        if (!value &&!isLocked) {
             cell.dataset.ghost = current;
         }
         if (winRowGlobal && winRowGlobal.includes(i)) {
@@ -163,7 +163,7 @@ function move(i) {
     if (mode === "bot" && current === "O" &&!gameOver &&!waitingForNextRound) {
         const adaptiveLevel = getAdaptiveLevel();
         const delay = botLevel === 5
-        ? 400 + adaptiveLevel * 250
+       ? 400 + adaptiveLevel * 250
             : {1: 300 + Math.random() * 200, 2: 500 + Math.random() * 300, 3: 700 + Math.random() * 400, 4: 1000 + Math.random() * 500}[botLevel];
 
         const ghostIndex = botPreview();
@@ -223,6 +223,35 @@ function getFreeCells() {
     return cells.map((v, i) => v === null? i : null).filter(v => v!== null);
 }
 
+/* NEU: Hilfsfunktion für Zufall aus Top N */
+function pickFromBest(moves, topN = 2) {
+    const count = Math.min(topN, moves.length);
+    if(count === 0) return null;
+    return moves[Math.floor(Math.random() * count)];
+}
+
+/* NEU: Gibt alle gleich guten Minimax Züge zurück */
+function getBestMovesFromMinimax(board, player) {
+    let bestScore = -Infinity;
+    let bestMoves = [];
+    const free = board.map((v, i) => v === null? i : null).filter(v => v!== null);
+
+    for (let i of free) {
+        const newBoard = board.slice();
+        newBoard[i] = player;
+        const result = minimax(newBoard, player === "O"? "X" : "O");
+        const currentScore = player === "O"? result.score : -result.score;
+
+        if (currentScore > bestScore) {
+            bestScore = currentScore;
+            bestMoves = [i];
+        } else if (currentScore === bestScore) {
+            bestMoves.push(i);
+        }
+    }
+    return bestMoves;
+}
+
 /* Menschliche Zug-Priorität: Mitte > Ecken > Kanten */
 function getHumanPriorityMoves() {
     const free = getFreeCells();
@@ -255,10 +284,10 @@ function botMedium() {
     const block = findCritical("X");
     if(block!== null && Math.random() < 0.6) return block;
 
-    return getHumanPriorityMoves()[0] || botRandom();
+    return pickFromBest(getHumanPriorityMoves(), 2) || botRandom(); // GEÄNDERT
 }
 
-/* Bot Level 3: Gut aber macht Denkfehler */
+/* Bot Level 3: Gut aber macht Denkfehler - JETZT DYNAMISCH */
 function botHard() {
     const win = findCritical("O");
     if(win!== null) return win;
@@ -266,20 +295,29 @@ function botHard() {
     const block = findCritical("X");
     if(block!== null && Math.random() < 0.9) return block;
 
-    if(Math.random() < 0.15) {
-        return getHumanPriorityMoves()[Math.floor(Math.random() * 3)] || botRandom();
+    if(Math.random() < 0.15) { // 15% Denkfehler
+        return pickFromBest(getHumanPriorityMoves(), 3) || botRandom();
     }
 
-    return getHumanPriorityMoves()[0] || botRandom();
+    return pickFromBest(getHumanPriorityMoves(), 2) || botRandom(); // GEÄNDERT
 }
 
-/* Bot Level 4: Fast perfekt */
+/* Bot Level 4: Fast perfekt - JETZT DYNAMISCH + PATZER */
 function botPerfect() {
     const win = findCritical("O");
-    if(win!== null) return win;
+    if(win!== null) return win; // 1. Gewinnen IMMER
+
     const block = findCritical("X");
-    if(block!== null) return block;
-    return minimax(cells, "O").index;
+    if(block!== null && Math.random() < 0.95) return block; // 2. Blocken 95%
+
+    const bestMoves = getBestMovesFromMinimax(cells, "O");
+    let move = pickFromBest(bestMoves, bestMoves.length); // 3. Zufall aus allen besten
+
+    // 4. 10% Chance auf kleinen Patzer
+    if(Math.random() < 0.1) {
+        move = pickFromBest(getHumanPriorityMoves(), 3) || move;
+    }
+    return move;
 }
 
 /* Bot Level 5: Adaptive */
@@ -392,7 +430,7 @@ function endRound(winner, winRow = null) {
     startingPlayer = startingPlayer === "X"? "O" : "X";
 
     // ⭐ Skill anpassen - jetzt mit adapt() für Sehr Schnell
-    if (winner !== "draw") {
+    if (winner!== "draw") {
         if (winner === "X") playerSkill += adapt(10);
         if (winner === "O") playerSkill -= adapt(10);
     } else {
@@ -451,7 +489,7 @@ function endRound(winner, winRow = null) {
     // ⭐ HIER wird adaptiveStatus NICHT mehr überschrieben
 if(matchFinished){
     let parts = [];
-    
+
     // 1. Bei adaptivem Bot Info drin lassen
     if (botLevel === 5) {
         const newAdaptiveLevel = getAdaptiveLevel();
@@ -459,19 +497,19 @@ if(matchFinished){
     } else {
         parts.push(`Match beendet`);
     }
-    
+
     // 2. Klicke Text dran
     status.textContent = parts.join(" | ") + " | Klicke 'Neues Spiel'";
-    
+
     // 3. Nur oben ins Banner
     let winnerText = "";
     if (scoreX > scoreO) winnerText = "Gesamtsieger: X";
     else if (scoreO > scoreX) winnerText = "Gesamtsieger: O";
     else winnerText = "Gesamt: Unentschieden!";
-    
+
     winnerBanner.textContent = winnerText;
     winnerBanner.classList.add("show");
-    
+
     reset.textContent = "Neues Spiel";
 } else {
     status.textContent = adaptiveStatus + message + " | Klicke 'Neue Runde'";
@@ -483,17 +521,17 @@ if(matchFinished){
 
 /* Reset - ÜBERARBEITET */
 function resetGame(full = true) {
-    readSettings(); 
+    readSettings();
     cells = Array(9).fill(null);
     waitingForNextRound = false;
     winRowGlobal = null;
 
     // NUR entsperren wenn es nicht der erste Aufruf ist
     if(isInitialized) {
-        gameOver = false; 
+        gameOver = false;
         board.classList.remove('locked');
     }
-    
+
     if (full) {
 		status.classList.remove("winner"); // ⭐ Highlight zurücksetzen
         matchOver = false;
@@ -508,7 +546,7 @@ function resetGame(full = true) {
     }
 
     current = startingPlayer;
-    status.textContent = full ? `Runde 1/${totalRounds} - ${current} beginnt` : `Runde ${roundsPlayed+1}/${totalRounds} - ${current} beginnt`;
+    status.textContent = full? `Runde 1/${totalRounds} - ${current} beginnt` : `Runde ${roundsPlayed+1}/${totalRounds} - ${current} beginnt`;
     reset.textContent = "Neu starten";
     render();
 
@@ -530,7 +568,7 @@ reset.onclick = () => {
 
 /* initial start - Board beim Start sperren */
 function init() {
-    readSettings(); 
+    readSettings();
     cells = Array(9).fill(null);
     gameOver = true; // Board sperren
     board.classList.add('locked'); // Grau
