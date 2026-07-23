@@ -36,6 +36,14 @@ let adaptSpeed = "normal";
 let roundMode = "short";
 let isInitialized = false;
 
+/* ⭐ HABIT SYSTEM - wird pro Session gemerkt */
+let habits = {
+    favoriteCells: [0,0,0,0,0,0,0,0,0], // Zähler pro Feld
+    mistakes: 0, // +1 wenn Spieler Fehler macht
+    badOpenings: [0,0,0,0,0,0,0,0,0] // mit welchem Startzug Spieler verliert
+};
+let firstMoveMade = false; // für Eröffnung T2
+
 function readSettings() {
     mode = window.currentPlayers;
     botLevel = window.currentDifficulty;
@@ -145,6 +153,8 @@ function move(i) {
     if (cells[i] || gameOver || waitingForNextRound) return;
 
     cells[i] = current;
+	updateHabits(i, current);
+    if(isMistake(i)) habits.mistakes++; // zählt deine Fehler
     playClick();
     if (adaptSpeed === "veryfast") {
         playerSkill += 1.2;
@@ -183,6 +193,58 @@ function move(i) {
     }
 }
 
+/* ⭐ HABIT HELPER */
+function updateHabits(move, player) {
+    if (player === "X") {
+        habits.favoriteCells[move]++;
+        if (!firstMoveMade) firstMoveMade = true;
+    }
+}
+
+function getTopFavoriteCells(n) {
+    return habits.favoriteCells
+       .map((v, i) => ({i, v}))
+       .sort((a,b) => b.v - a.v)
+       .slice(0, n)
+       .map(x => x.i);
+}
+
+function wouldWin(board, player, move) {
+    const test = board.slice();
+    test[move] = player;
+    return checkWin(player, test)!== null;
+}
+
+function wouldFork(board, player, move) {
+    const test = board.slice();
+    test[move] = player;
+    let wins = 0;
+    for(let i=0; i<9; i++) {
+        if(test[i] === null) {
+            test[i] = player;
+            if(checkWin(player, test)) wins++;
+            test[i] = null;
+        }
+    }
+    return wins >= 2;
+}
+
+/* T2: Perfekte Eröffnung */
+function getPerfectOpening() {
+    if (cells[4] === null) return 4; // Mitte
+    const corners = [0,2,6,8].filter(i => cells[i] === null);
+    if (corners.length) return corners[Math.floor(Math.random() * corners.length)];
+    return null;
+}
+
+/* T4: Ist Zug ein Fehler? */
+function isMistake(move) {
+    // Fehler = nicht blocken wenn X gewinnen kann
+    const block = findCritical("X");
+    if(block!== null && move!== block) return true;
+    return false;
+}
+
 /* Bot Move - MENSCHLICH */
 function botMove() {
     if(waitingForNextRound) return;
@@ -200,6 +262,7 @@ function botMove() {
     }
 
     cells[moveIndex] = "O";
+	if(isMistake(moveIndex)) habits.mistakes++; // falls Bot auch Fehler macht
     playClick();
     if (adaptSpeed === "veryfast") {
         playerSkill -= 1.2;
@@ -278,9 +341,18 @@ function getHumanPriorityMoves() {
     return priority;
 }
 
-/* Bot Level 1: Zufall + manchmal dumm */
+/* Bot Level 1: Zufall + 10% Lieblingsfeld */
 function botRandom() {
     const free = getFreeCells();
+    const habitRoll = Math.random();
+
+    // 10% nimmt Lieblingsfeld
+    if(habitRoll < 0.1) {
+        const fav = getTopFavoriteCells(1)[0];
+        if(fav!== undefined && cells[fav] === null) return fav;
+    }
+
+    // 20% dummer Kanten-Zug
     if(Math.random() < 0.2) {
         const badMoves = free.filter(i =>![0,2,4,6,8].includes(i));
         if(badMoves.length > 0) return badMoves[Math.floor(Math.random() * badMoves.length)];
@@ -288,8 +360,17 @@ function botRandom() {
     return free[Math.floor(Math.random() * free.length)];
 }
 
-/* Bot Level 2: Blockt manchmal, spielt oft "sicher" */
+/* Bot Level 2: 30% Lieblingsfeld blocken + Blocken/Gewinnen */
 function botMedium() {
+    const habitStrength = 0.6; // war 0.3
+
+    // 60% blockt Top-2 Lieblingsfelder statt nur 1
+    if(Math.random() < habitStrength) {
+        const favs = getTopFavoriteCells(2);
+        const favMove = favs.find(i => cells[i] === null);
+        if(favMove!== undefined) return favMove;
+    }
+
     const win = findCritical("O");
     if(win!== null && Math.random() < 0.7) return win;
 
@@ -299,34 +380,97 @@ function botMedium() {
     return pickFromBest(getHumanPriorityMoves(), 2) || botRandom();
 }
 
-/* Bot Level 3: Gut aber macht Denkfehler - JETZT DYNAMISCH */
+/* Bot Level 3: 60% Lieblingsfeld + T1 70% + T2 50% + T3 70% + T4 */
 function botHard() {
+    const habitStrength = 0.9; // 1. war 0.6 -> jetzt 90% merkt er dich
+    const free = getFreeCells();
+
+    // T2: 80% Perfekte Eröffnung - 2. war 0.5
+    const movesMade = cells.filter(c => c!== null).length;
+    if(movesMade < 2 && Math.random() < 0.8) {
+        const opening = getPerfectOpening();
+        if(opening!== null) return opening;
+    }
+
+    // 90% blockt Top-3 Lieblingsfelder - 3. war Top-2 mit 60%
+    if(Math.random() < habitStrength) {
+        const favs = getTopFavoriteCells(3);
+        const favMove = favs.find(i => cells[i] === null);
+        if(favMove!== undefined) return favMove;
+    }
+
     const win = findCritical("O");
     if(win!== null) return win;
 
     const block = findCritical("X");
-    if(block!== null && Math.random() < 0.9) return block;
+    if(block!== null && Math.random() < 1.0) return block; // 4. war 0.9 -> blockt jetzt IMMER
 
-    if(Math.random() < 0.15) { // 15% Denkfehler
+    // T1: 90% Gabel stellen - 5. war 0.7
+    if(Math.random() < 0.9) {
+        const fork = free.find(i => wouldFork(cells, "O", i));
+        if(fork!== undefined) return fork;
+    }
+
+    // T3: 90% Gegen-Gabel - 6. war 0.7
+    if(Math.random() < 0.9) {
+        const antiFork = free.find(i => wouldFork(cells, "X", i));
+        if(antiFork!== undefined) {
+            return free[Math.floor(Math.random() * free.length)];
+        }
+    }
+
+    // T4: Ab 2 Fehlern +80% aggressiv - 7. war >=3 und 0.6
+    if(habits.mistakes >= 2 && Math.random() < 0.8) {
+        const fork = free.find(i => wouldFork(cells, "O", i));
+        if(fork!== undefined) return fork;
+    }
+
+    if(Math.random() < 0.1) { // 8. war 0.15 -> nur noch 10% Denkfehler
         return pickFromBest(getHumanPriorityMoves(), 3) || botRandom();
     }
 
     return pickFromBest(getHumanPriorityMoves(), 2) || botRandom();
 }
 
-/* Bot Level 4: Fast perfekt - JETZT DYNAMISCH + PATZER */
+/* Bot Level 4: 100% Lieblingsfeld + T1-T4 Immer + Minimax + 10% Patzer */
 function botPerfect() {
+    // T2: 100% Perfekte Eröffnung
+    const movesMade = cells.filter(c => c!== null).length;
+    if(movesMade < 2) {
+        const opening = getPerfectOpening();
+        if(opening!== null) return opening;
+    }
+
+    // 80% blockt Top-3 Lieblingsfelder - war 0.3
+    const favs = getTopFavoriteCells(3);
+    const favMove = favs.find(i => cells[i] === null);
+    if(favMove!== undefined && Math.random() < 0.8) return favMove;
+
     const win = findCritical("O");
     if(win!== null) return win;
 
     const block = findCritical("X");
-    if(block!== null && Math.random() < 0.95) return block;
+    if(block!== null) return block;
+
+    // T1: Gabel immer
+    const fork = getFreeCells().find(i => wouldFork(cells, "O", i));
+    if(fork!== undefined) return fork;
+
+    // T3: Gegen-Gabel immer
+    const antiFork = getFreeCells().find(i => wouldFork(cells, "X", i));
+    if(antiFork!== undefined) return antiFork;
+
+    // T4: Fehler-Farmer immer aktiv
+    if(habits.mistakes >= 1) {
+        const fork = getFreeCells().find(i => wouldFork(cells, "O", i));
+        if(fork!== undefined) return fork;
+    }
 
     const bestMoves = getBestMovesFromMinimax(cells, "O");
     let move = pickFromBest(bestMoves, bestMoves.length);
 
-    // 10% Chance auf kleinen Patzer
-    if(Math.random() < 0.1) {
+    // 5% Patzer statt 10% - fast perfekt
+    if(Math.random() < 0.05) {
         move = pickFromBest(getHumanPriorityMoves(), 3) || move;
     }
     return move;
