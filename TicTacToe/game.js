@@ -177,7 +177,7 @@ function move(i) {
     if (mode === "bot" && current === "O" &&!gameOver &&!waitingForNextRound) {
         const adaptiveLevel = getAdaptiveLevel();
         const delay = botLevel === 5
-       ? 400 + adaptiveLevel * 250
+      ? 400 + adaptiveLevel * 250
             : {1: 300 + Math.random() * 200, 2: 500 + Math.random() * 300, 3: 700 + Math.random() * 400, 4: 1000 + Math.random() * 500}[botLevel];
 
         const ghostIndex = botPreview();
@@ -203,10 +203,10 @@ function updateHabits(move, player) {
 
 function getTopFavoriteCells(n) {
     return habits.favoriteCells
-       .map((v, i) => ({i, v}))
-       .sort((a,b) => b.v - a.v)
-       .slice(0, n)
-       .map(x => x.i);
+      .map((v, i) => ({i, v}))
+      .sort((a,b) => b.v - a.v)
+      .slice(0, n)
+      .map(x => x.i);
 }
 
 function wouldWin(board, player, move) {
@@ -243,6 +243,38 @@ function isMistake(move) {
     const block = findCritical("X");
     if(block!== null && move!== block) return true;
     return false;
+}
+
+/* NEU: Minimax mit Habits-Bonus */
+function getMinimaxScores(boardState, player) {
+    const free = boardState.map((v, i) => v === null? i : null).filter(v => v!== null);
+    if (checkWin("X", boardState)) return [];
+    if (checkWin("O", boardState)) return [];
+    if (free.length === 0) return [];
+
+    let scores = [];
+    for (let i of free) {
+        const newState = [...boardState];
+        newState[i] = player;
+        const result = minimax(newState, player === "O"? "X" : "O");
+        let score = player === "O"? result.score : -result.score;
+
+        // ⭐ HABITS ALS BONUS-PUNKTE für menschliches Spiel
+        if(i === 4) score += 3; // Mitte
+        if([0,2,6,8].includes(i)) score += 2; // Ecken
+        if(wouldFork(boardState, player, i)) score += 10; // Gabel
+
+        scores.push({index: i, score: score});
+    }
+    return scores.sort((a,b) => b.score - a.score);
+}
+
+/* NEU: Nimmt aus Top N einen zufälligen Zug */
+function pickFromTop(scores, topN) {
+    const count = Math.min(topN, scores.length);
+    if(count === 0) return null;
+    const chosen = scores[Math.floor(Math.random() * count)];
+    return chosen.index;
 }
 
 /* Bot Move - MENSCHLICH */
@@ -283,7 +315,7 @@ function botMove() {
     render();
 }
 
-/* === MENSCHLICHER BOT === */
+/* === MENSCHLICHER BOT MIT MINIMAX === */
 
 /* Hilfsfunktion: Freie Felder */
 function getFreeCells() {
@@ -297,28 +329,6 @@ function pickFromBest(moves, topN = 2) {
     return moves[Math.floor(Math.random() * count)];
 }
 
-/* NEU: Gibt alle gleich guten Minimax Züge zurück - GEMISCHT */
-function getBestMovesFromMinimax(board, player) {
-    let bestScore = -Infinity;
-    let bestMoves = [];
-    const free = shuffleArray(board.map((v, i) => v === null? i : null).filter(v => v!== null));
-
-    for (let i of free) {
-        const newBoard = board.slice();
-        newBoard[i] = player;
-        const result = minimax(newBoard, player === "O"? "X" : "O");
-        const currentScore = player === "O"? result.score : -result.score;
-
-        if (currentScore > bestScore) {
-            bestScore = currentScore;
-            bestMoves = [i];
-        } else if (currentScore === bestScore) {
-            bestMoves.push(i);
-        }
-    }
-    return bestMoves;
-}
-
 /* GEÄNDERT: Menschliche Zug-Priorität: Mitte > Ecken > Kanten - JETZT GEMISCHT + 20% Kante statt Ecke */
 function getHumanPriorityMoves() {
     const free = getFreeCells();
@@ -328,8 +338,6 @@ function getHumanPriorityMoves() {
     let priority = [];
     if(free.includes(4)) priority.push(4);
 
-    // 80% Chance: klassisch Ecken vor Kanten
-    // 20% Chance: "Druckfehler" - Kanten vor Ecken
     if(Math.random() < 0.8) {
         priority.push(...corners);
         priority.push(...edges);
@@ -341,98 +349,72 @@ function getHumanPriorityMoves() {
     return priority;
 }
 
-/* Bot Level 1: Zufall + 10% Lieblingsfeld */
+/* Bot Level 1: Anfänger - 90% random, 10% "Aha Moment" */
 function botRandom() {
     const free = getFreeCells();
-    const habitRoll = Math.random();
 
-    // 10% nimmt Lieblingsfeld
-    if(habitRoll < 0.1) {
-        const fav = getTopFavoriteCells(1)[0];
-        if(fav!== undefined && cells[fav] === null) return fav;
+    // 10% "Herbert Moment": nimmt Mitte oder gewinnt
+    if(Math.random() < 0.1) {
+        const win = findCritical("O");
+        if(win!== null) return win;
+        if(free.includes(4)) return 4;
     }
 
-    // 20% dummer Kanten-Zug
-    if(Math.random() < 0.2) {
-        const badMoves = free.filter(i =>![0,2,4,6,8].includes(i));
-        if(badMoves.length > 0) return badMoves[Math.floor(Math.random() * badMoves.length)];
-    }
+    // 90% komplett random
     return free[Math.floor(Math.random() * free.length)];
 }
 
-/* Bot Level 2: 30% Lieblingsfeld blocken + Blocken/Gewinnen */
+/* Bot Level 2: Rookie - 20% Minimax */
 function botMedium() {
-    const habitStrength = 0.6; // war 0.3
+    // Gewinn/Block geht immer
+    const win = findCritical("O");
+    if(win!== null) return win;
+    const block = findCritical("X");
+    if(block!== null) return block;
 
-    // 60% blockt Top-2 Lieblingsfelder statt nur 1
-    if(Math.random() < habitStrength) {
-        const favs = getTopFavoriteCells(2);
-        const favMove = favs.find(i => cells[i] === null);
-        if(favMove!== undefined) return favMove;
+    // 20% denkt mit Minimax + Habits
+    if(Math.random() < 0.2) {
+        const scores = getMinimaxScores(cells, "O");
+        return pickFromTop(scores, 3); // nimmt aus Top 3
     }
 
-    const win = findCritical("O");
-    if(win!== null && Math.random() < 0.7) return win;
-
-    const block = findCritical("X");
-    if(block!== null && Math.random() < 0.6) return block;
+    // Sonst: Habits + Priorität
+    const favs = getTopFavoriteCells(2);
+    const favMove = favs.find(i => cells[i] === null);
+    if(favMove!== undefined) return favMove;
 
     return pickFromBest(getHumanPriorityMoves(), 2) || botRandom();
 }
 
-/* Bot Level 3: 60% Lieblingsfeld + T1 70% + T2 50% + T3 70% + T4 */
+/* Bot Level 3: Verein - 60% Minimax */
 function botHard() {
-    const habitStrength = 0.9; // 1. war 0.6 -> jetzt 90% merkt er dich
-    const free = getFreeCells();
+    const win = findCritical("O");
+    if(win!== null) return win;
+    const block = findCritical("X");
+    if(block!== null) return block;
 
-    // T2: 80% Perfekte Eröffnung - 2. war 0.5
+    // T2: 50% Perfekte Eröffnung
     const movesMade = cells.filter(c => c!== null).length;
-    if(movesMade < 2 && Math.random() < 0.8) {
+    if(movesMade < 2 && Math.random() < 0.5) {
         const opening = getPerfectOpening();
         if(opening!== null) return opening;
     }
 
-    // 90% blockt Top-3 Lieblingsfelder - 3. war Top-2 mit 60%
-    if(Math.random() < habitStrength) {
-        const favs = getTopFavoriteCells(3);
-        const favMove = favs.find(i => cells[i] === null);
-        if(favMove!== undefined) return favMove;
+    // 60% Minimax + Habits
+    if(Math.random() < 0.6) {
+        const scores = getMinimaxScores(cells, "O");
+        return pickFromTop(scores, 2); // nimmt aus Top 2
     }
 
-    const win = findCritical("O");
-    if(win!== null) return win;
-
-    const block = findCritical("X");
-    if(block!== null && Math.random() < 1.0) return block; // 4. war 0.9 -> blockt jetzt IMMER
-
-    // T1: 90% Gabel stellen - 5. war 0.7
-    if(Math.random() < 0.9) {
-        const fork = free.find(i => wouldFork(cells, "O", i));
-        if(fork!== undefined) return fork;
-    }
-
-    // T3: 90% Gegen-Gabel - 6. war 0.7
-    if(Math.random() < 0.9) {
-        const antiFork = free.find(i => wouldFork(cells, "X", i));
-        if(antiFork!== undefined) {
-            return free[Math.floor(Math.random() * free.length)];
-        }
-    }
-
-    // T4: Ab 2 Fehlern +80% aggressiv - 7. war >=3 und 0.6
-    if(habits.mistakes >= 2 && Math.random() < 0.8) {
-        const fork = free.find(i => wouldFork(cells, "O", i));
-        if(fork!== undefined) return fork;
-    }
-
-    if(Math.random() < 0.1) { // 8. war 0.15 -> nur noch 10% Denkfehler
-        return pickFromBest(getHumanPriorityMoves(), 3) || botRandom();
-    }
+    // Fallback: Habits
+    const favs = getTopFavoriteCells(3);
+    const favMove = favs.find(i => cells[i] === null);
+    if(favMove!== undefined) return favMove;
 
     return pickFromBest(getHumanPriorityMoves(), 2) || botRandom();
 }
 
-/* Bot Level 4: 100% Lieblingsfeld + T1-T4 Immer + Minimax + 10% Patzer */
+/* Bot Level 4: Meister - 90% Minimax */
 function botPerfect() {
     // T2: 100% Perfekte Eröffnung
     const movesMade = cells.filter(c => c!== null).length;
@@ -441,39 +423,21 @@ function botPerfect() {
         if(opening!== null) return opening;
     }
 
-    // 80% blockt Top-3 Lieblingsfelder - war 0.3
-    const favs = getTopFavoriteCells(3);
-    const favMove = favs.find(i => cells[i] === null);
-    if(favMove!== undefined && Math.random() < 0.8) return favMove;
-
     const win = findCritical("O");
     if(win!== null) return win;
 
     const block = findCritical("X");
     if(block!== null) return block;
 
-    // T1: Gabel immer
-    const fork = getFreeCells().find(i => wouldFork(cells, "O", i));
-    if(fork!== undefined) return fork;
-
-    // T3: Gegen-Gabel immer
-    const antiFork = getFreeCells().find(i => wouldFork(cells, "X", i));
-    if(antiFork!== undefined) return antiFork;
-
-    // T4: Fehler-Farmer immer aktiv
-    if(habits.mistakes >= 1) {
-        const fork = getFreeCells().find(i => wouldFork(cells, "O", i));
-        if(fork!== undefined) return fork;
+    // 90% Perfektes Minimax + Habits
+    if(Math.random() < 0.9) {
+        const scores = getMinimaxScores(cells, "O");
+        return pickFromTop(scores, 1); // nimmt BESTEN
     }
 
-    const bestMoves = getBestMovesFromMinimax(cells, "O");
-    let move = pickFromBest(bestMoves, bestMoves.length);
-
-    // 5% Patzer statt 10% - fast perfekt
-    if(Math.random() < 0.05) {
-        move = pickFromBest(getHumanPriorityMoves(), 3) || move;
-    }
-    return move;
+    // 10% Patzer: nimmt 2. oder 3. besten
+    const scores = getMinimaxScores(cells, "O");
+    return pickFromTop(scores, 3) || botRandom();
 }
 
 /* Bot Level 5: Adaptive */
