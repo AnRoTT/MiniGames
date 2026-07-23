@@ -177,7 +177,7 @@ function move(i) {
     if (mode === "bot" && current === "O" &&!gameOver &&!waitingForNextRound) {
         const adaptiveLevel = getAdaptiveLevel();
         const delay = botLevel === 5
-      ? 400 + adaptiveLevel * 250
+       ? 400 + adaptiveLevel * 250
             : {1: 300 + Math.random() * 200, 2: 500 + Math.random() * 300, 3: 700 + Math.random() * 400, 4: 1000 + Math.random() * 500}[botLevel];
 
         const ghostIndex = botPreview();
@@ -203,10 +203,10 @@ function updateHabits(move, player) {
 
 function getTopFavoriteCells(n) {
     return habits.favoriteCells
-      .map((v, i) => ({i, v}))
-      .sort((a,b) => b.v - a.v)
-      .slice(0, n)
-      .map(x => x.i);
+       .map((v, i) => ({i, v}))
+       .sort((a,b) => b.v - a.v)
+       .slice(0, n)
+       .map(x => x.i);
 }
 
 function wouldWin(board, player, move) {
@@ -239,41 +239,10 @@ function getPerfectOpening() {
 
 /* T4: Ist Zug ein Fehler? */
 function isMistake(move) {
+    // Fehler = nicht blocken wenn X gewinnen kann
     const block = findCritical("X");
     if(block!== null && move!== block) return true;
     return false;
-}
-
-/* NEU: Minimax mit Habits-Bonus */
-function getMinimaxScores(boardState, player) {
-    const free = boardState.map((v, i) => v === null? i : null).filter(v => v!== null);
-    if (checkWin("X", boardState)) return [];
-    if (checkWin("O", boardState)) return [];
-    if (free.length === 0) return [];
-
-    let scores = [];
-    for (let i of free) {
-        const newState = [...boardState];
-        newState[i] = player;
-        const result = minimax(newState, player === "O"? "X" : "O");
-        let score = player === "O"? result.score : -result.score;
-
-        // ⭐ HABITS ALS BONUS-PUNKTE für menschliches Spiel
-        if(i === 4) score += 3; // Mitte
-        if([0,2,6,8].includes(i)) score += 2; // Ecken
-        if(wouldFork(boardState, player, i)) score += 10; // Gabel
-
-        scores.push({index: i, score: score});
-    }
-    return scores.sort((a,b) => b.score - a.score);
-}
-
-/* NEU: Nimmt aus Top N einen zufälligen Zug */
-function pickFromTop(scores, topN) {
-    const count = Math.min(topN, scores.length);
-    if(count === 0) return null;
-    const chosen = scores[Math.floor(Math.random() * count)];
-    return chosen.index;
 }
 
 /* Bot Move - MENSCHLICH */
@@ -314,7 +283,7 @@ function botMove() {
     render();
 }
 
-/* === MENSCHLICHER BOT MIT MINIMAX === */
+/* === MENSCHLICHER BOT === */
 
 /* Hilfsfunktion: Freie Felder */
 function getFreeCells() {
@@ -328,7 +297,29 @@ function pickFromBest(moves, topN = 2) {
     return moves[Math.floor(Math.random() * count)];
 }
 
-/* GEÄNDERT: Menschliche Zug-Priorität: Mitte > Ecken > Kanten */
+/* NEU: Gibt alle gleich guten Minimax Züge zurück - GEMISCHT */
+function getBestMovesFromMinimax(board, player) {
+    let bestScore = -Infinity;
+    let bestMoves = [];
+    const free = shuffleArray(board.map((v, i) => v === null? i : null).filter(v => v!== null));
+
+    for (let i of free) {
+        const newBoard = board.slice();
+        newBoard[i] = player;
+        const result = minimax(newBoard, player === "O"? "X" : "O");
+        const currentScore = player === "O"? result.score : -result.score;
+
+        if (currentScore > bestScore) {
+            bestScore = currentScore;
+            bestMoves = [i];
+        } else if (currentScore === bestScore) {
+            bestMoves.push(i);
+        }
+    }
+    return bestMoves;
+}
+
+/* GEÄNDERT: Menschliche Zug-Priorität: Mitte > Ecken > Kanten - JETZT GEMISCHT + 20% Kante statt Ecke */
 function getHumanPriorityMoves() {
     const free = getFreeCells();
     const corners = shuffleArray([0,2,6,8].filter(i => free.includes(i)));
@@ -337,6 +328,8 @@ function getHumanPriorityMoves() {
     let priority = [];
     if(free.includes(4)) priority.push(4);
 
+    // 80% Chance: klassisch Ecken vor Kanten
+    // 20% Chance: "Druckfehler" - Kanten vor Ecken
     if(Math.random() < 0.8) {
         priority.push(...corners);
         priority.push(...edges);
@@ -348,84 +341,157 @@ function getHumanPriorityMoves() {
     return priority;
 }
 
-/* Bot Level 1: Anfänger - 90% random, 10% "Aha Moment" */
+/* Bot Level 1: Zufall + 10% Lieblingsfeld */
 function botRandom() {
     const free = getFreeCells();
+    const habitRoll = Math.random();
 
-    if(Math.random() < 0.1) {
-        const win = findCritical("O");
-        if(win!== null) return win;
-        if(free.includes(4)) return 4;
+    // 20% Glücksmoment: spielt einmal optimal per Minimax
+    if(Math.random() < 0.2) {
+        const bestMoves = getBestMovesFromMinimax(cells, "O");
+        if(bestMoves.length > 0) return bestMoves[Math.floor(Math.random() * bestMoves.length)];
     }
 
+    // 10% nimmt Lieblingsfeld
+    if(habitRoll < 0.1) {
+        const fav = getTopFavoriteCells(1)[0];
+        if(fav!== undefined && cells[fav] === null) return fav;
+    }
+
+    // 20% dummer Kanten-Zug
+    if(Math.random() < 0.2) {
+        const badMoves = free.filter(i =>![0,2,4,6,8].includes(i));
+        if(badMoves.length > 0) return badMoves[Math.floor(Math.random() * badMoves.length)];
+    }
     return free[Math.floor(Math.random() * free.length)];
 }
 
-/* Bot Level 2: Rookie - 20% Minimax */
+/* Bot Level 2: 30% Lieblingsfeld blocken + Blocken/Gewinnen */
 function botMedium() {
-    const win = findCritical("O");
-    if(win!== null) return win;
-    const block = findCritical("X");
-    if(block!== null) return block;
+    const habitStrength = 0.6;
 
-    if(Math.random() < 0.2) {
-        const scores = getMinimaxScores(cells, "O");
-        return pickFromTop(scores, 3);
+    // 60% blockt Top-2 Lieblingsfelder
+    if(Math.random() < habitStrength) {
+        const favs = getTopFavoriteCells(2);
+        const favMove = favs.find(i => cells[i] === null);
+        if(favMove!== undefined) return favMove;
     }
 
-    const favs = getTopFavoriteCells(2);
-    const favMove = favs.find(i => cells[i] === null);
-    if(favMove!== undefined) return favMove;
+    const win = findCritical("O");
+    if(win!== null && Math.random() < 0.7) return win;
+
+    const block = findCritical("X");
+    if(block!== null && Math.random() < 0.6) return block;
+
+    // 50% spielt optimal per Minimax
+    if(Math.random() < 0.5) {
+        const bestMoves = getBestMovesFromMinimax(cells, "O");
+        return pickFromBest(bestMoves, 2);
+    }
 
     return pickFromBest(getHumanPriorityMoves(), 2) || botRandom();
 }
 
-/* Bot Level 3: Verein - 60% Minimax */
-function botHard() {
+/* Bot Level 3: Mittel */
+function botHard() { // L3 Mittel
+    const free = getFreeCells();
+
+    // 1. GEWINNEN IMMER
     const win = findCritical("O");
     if(win!== null) return win;
+
+    // 2. BLOCKEN IMMER
     const block = findCritical("X");
     if(block!== null) return block;
 
-    const movesMade = cells.filter(c => c!== null).length;
-    if(movesMade < 2 && Math.random() < 0.5) {
-        const opening = getPerfectOpening();
-        if(opening!== null) return opening;
+    // 3. Erst dann der Rest
+
+    // 70% nimmt Lieblingsfeld Top-2
+    if(Math.random() < 0.7) {
+        const favs = getTopFavoriteCells(2);
+        const favMove = favs.find(i => cells[i] === null);
+        if(favMove!== undefined) return favMove;
     }
 
+    // T1: 60% Gabel stellen
     if(Math.random() < 0.6) {
-        const scores = getMinimaxScores(cells, "O");
-        return pickFromTop(scores, 2);
+        const fork = free.find(i => wouldFork(cells, "O", i));
+        if(fork!== undefined) return fork;
     }
 
-    const favs = getTopFavoriteCells(3);
-    const favMove = favs.find(i => cells[i] === null);
-    if(favMove!== undefined) return favMove;
+    // T3: 70% Gegen-Gabel
+    if(Math.random() < 0.7) {
+        const antiFork = free.find(i => wouldFork(cells, "X", i));
+        if(antiFork!== undefined) return free[Math.floor(Math.random() * free.length)];
+    }
 
-    return pickFromBest(getHumanPriorityMoves(), 2) || botRandom();
+    // T4: Ab 3 Fehlern 60% aggressiv
+    if(habits.mistakes >= 3 && Math.random() < 0.6) {
+        const fork = free.find(i => wouldFork(cells, "O", i));
+        if(fork!== undefined) return fork;
+    }
+
+    // 70% spielt okay per Minimax
+    if(Math.random() < 0.7) {
+        const bestMoves = getBestMovesFromMinimax(cells, "O");
+        return pickFromBest(bestMoves, 2); // nimmt 1 von Top 2
+    }
+
+    return pickFromBest(getHumanPriorityMoves(), 3) || botRandom();
 }
 
-/* Bot Level 4: Meister - 90% Minimax */
-function botPerfect() {
+/* Bot Level 4: Schwer */
+function botPerfect() { // L4 Schwer
+    // 1. GEWINNEN IMMER
+    const win = findCritical("O");
+    if(win!== null) return win;
+
+    // 2. BLOCKEN IMMER
+    const block = findCritical("X");
+    if(block!== null) return block;
+
+    // 3. Erst dann der Rest
+
+    // T2: 100% Perfekte Eröffnung
     const movesMade = cells.filter(c => c!== null).length;
     if(movesMade < 2) {
         const opening = getPerfectOpening();
         if(opening!== null) return opening;
     }
 
-    const win = findCritical("O");
-    if(win!== null) return win;
+    // 85% nimmt Lieblingsfeld Top-3
+    const favs = getTopFavoriteCells(3);
+    const favMove = favs.find(i => cells[i] === null);
+    if(favMove!== undefined && Math.random() < 0.85) return favMove;
 
-    const block = findCritical("X");
-    if(block!== null) return block;
+    // T1: 95% Gabel
+    const fork = getFreeCells().find(i => wouldFork(cells, "O", i));
+    if(fork!== undefined && Math.random() < 0.95) return fork;
 
-    if(Math.random() < 0.9) {
-        const scores = getMinimaxScores(cells, "O");
-        return pickFromTop(scores, 1);
+    // T3: 95% Gegen-Gabel
+    const antiFork = getFreeCells().find(i => wouldFork(cells, "X", i));
+    if(antiFork!== undefined && Math.random() < 0.95) return antiFork;
+
+    // T4: Ab 1 Fehler 90% aggressiv
+    if(habits.mistakes >= 1 && Math.random() < 0.9) {
+        const fork = getFreeCells().find(i => wouldFork(cells, "O", i));
+        if(fork!== undefined) return fork;
     }
 
-    const scores = getMinimaxScores(cells, "O");
-    return pickFromTop(scores, 3) || botRandom();
+    // 3% Patzer nur bei sicheren Zügen
+    if(Math.random() < 0.03) {
+        const safeMoves = getFreeCells().filter(i => {
+            const testCells = [...cells];
+            testCells[i] = "O";
+            return findCritical("X", testCells) === null;
+        });
+        const free = safeMoves.length > 0? safeMoves : getFreeCells();
+        return free[Math.floor(Math.random() * free.length)];
+    }
+
+    // 97% bester Zug
+    const bestMoves = getBestMovesFromMinimax(cells, "O");
+    return bestMoves[0];
 }
 
 /* Bot Level 5: Adaptive */
@@ -439,7 +505,7 @@ function botAdaptive() {
     return applyAdaptiveError(moveIndex);
 }
 
-/* findCritical */
+/* findCritical bleibt gleich */
 function findCritical(player) {
     const wins = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
     for (let w of wins) {
@@ -452,7 +518,7 @@ function findCritical(player) {
     return null;
 }
 
-/* Minimax */
+/* Minimax bleibt gleich */
 function minimax(boardState, player) {
     const free = boardState.map((v, i) => v === null? i : null).filter(v => v!== null);
     if (checkWin("X", boardState)) return { score: -10 };
@@ -479,7 +545,7 @@ function checkWin(p, state = cells) {
     return null;
 }
 
-/* Highlight Win */
+/* Highlight Win - nur Text pulsieren */
 function highlightWin(row, winner) {
     row.forEach(i => {
         const cell = board.children[i];
@@ -516,13 +582,7 @@ function fireworkEffect() {
     }
 }
 
-/* Score Update */
-function updateScore(x, d, o) {
-    const scoreEl = document.getElementById("score");
-    if(scoreEl) scoreEl.textContent = `${x} : ${d} : ${o}`;
-}
-
-/* End Round - MIT RUNDEN + MATCH BANNER */
+/* End Round - MIT UNENTSCHIEDEN */
 function endRound(winner, winRow = null) {
     gameOver = true;
     waitingForNextRound = true;
@@ -598,36 +658,31 @@ function endRound(winner, winRow = null) {
 
     matchOver = matchFinished;
 
-    if(matchFinished){
-        let parts = [];
-        if (botLevel === 5) {
-            const newAdaptiveLevel = getAdaptiveLevel();
-            parts.push(`Adaptiver Bot (Neu: ${getAdaptiveLevelName(newAdaptiveLevel)}) | Skill: ${playerSkill.toFixed(0)}`);
-        } else {
-            parts.push(`Match beendet`);
-        }
-        status.textContent = parts.join(" | ") + " | Klicke 'Neues Spiel'";
-        let winnerText = "";
-        if (scoreX > scoreO) winnerText = "Gesamtsieger: X";
-        else if (scoreO > scoreX) winnerText = "Gesamtsieger: O";
-        else winnerText = "Gesamt: Unentschieden!";
-        winnerBanner.textContent = winnerText;
-        winnerBanner.classList.add("show");
-        reset.textContent = "Neues Spiel";
-        if(winnerText.includes("Gesamtsieger")) fireworkEffect();
+if(matchFinished){
+    let parts = [];
+    if (botLevel === 5) {
+        const newAdaptiveLevel = getAdaptiveLevel();
+        parts.push(`Adaptiver Bot (Neu: ${getAdaptiveLevelName(newAdaptiveLevel)}) | Skill: ${playerSkill.toFixed(0)}`);
     } else {
-        status.textContent = adaptiveStatus + message + " | Klicke 'Neue Runde'";
-        if(winner!== "draw"){
-            winnerBanner.textContent = `${winner} gewinnt Runde ${roundsPlayed}!`;
-        } else {
-            winnerBanner.textContent = "Unentschieden!";
-        }
-        winnerBanner.classList.add("show");
-        reset.textContent = "Neue Runde";
+        parts.push(`Match beendet`);
     }
+    status.textContent = parts.join(" | ") + " | Klicke 'Neues Spiel'";
+    let winnerText = "";
+    if (scoreX > scoreO) winnerText = "Gesamtsieger: X";
+    else if (scoreO > scoreX) winnerText = "Gesamtsieger: O";
+    else winnerText = "Gesamt: Unentschieden!";
+    winnerBanner.textContent = winnerText;
+    winnerBanner.classList.add("show");
+    reset.textContent = "Neues Spiel";
+} else {
+    status.textContent = adaptiveStatus + message + " | Klicke 'Neue Runde'";
+    winnerBanner.classList.remove("show");
+    winnerBanner.textContent = "";
+    reset.textContent = "Neue Runde";
+}
 }
 
-/* Reset */
+/* Reset - ÜBERARBEITET */
 function resetGame(full = true) {
     readSettings();
     cells = Array(9).fill(null);
@@ -662,7 +717,7 @@ function resetGame(full = true) {
     }
 }
 
-/* Reset Button Logik */
+/* NEU: Reset Button Logik */
 reset.onclick = () => {
     if(matchOver) {
         resetGame(true);
@@ -673,7 +728,7 @@ reset.onclick = () => {
     }
 };
 
-/* initial start */
+/* initial start - Board beim Start sperren */
 function init() {
     readSettings();
     cells = Array(9).fill(null);
@@ -686,17 +741,19 @@ function init() {
     isInitialized = true;
 }
 
-/* Sound für Buttons */
+/* ⭐ NEU: Sound für alle Cycle-Buttons */
 document.querySelectorAll('.cycle-btn').forEach(btn => {
     btn.addEventListener('click', () => {
         playClick(0.2);
     });
 });
 
+/* ⭐ NEU: Sound für Reset Button */
 reset.addEventListener('click', () => {
     playClick(0.2);
 });
 
+/* ⭐ NEU: Sound für Back Button */
 const backBtn = document.getElementById("backIcon");
 if(backBtn) {
     backBtn.addEventListener('click', () => {
