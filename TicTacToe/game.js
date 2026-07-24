@@ -30,7 +30,7 @@ let winRowGlobal = null;
 let matchOver = false;
 let waitingForNextRound = false;
 
-let playerSkill = 50;
+let playerSkill = 35;
 let adaptSpeed = "normal";
 
 let roundMode = "short";
@@ -104,24 +104,40 @@ function spawnParticles(x, y) {
 }
 
 /* ⭐ Adaptive Level bestimmen */
+/* ⭐ GEÄNDERT: Adaptive Level mit 0.5 Schritten */
 function getAdaptiveLevel() {
-    if (playerSkill < 30) return 1;
-    if (playerSkill < 60) return 2;
-    if (playerSkill < 85) return 3;
-    return 4;
+    if (playerSkill >= 100) return 6.0; // L6 Godmode
+    if (playerSkill < 20) return 1.0;
+    if (playerSkill < 35) return 1.5;
+    if (playerSkill < 50) return 2.0;
+    if (playerSkill < 65) return 2.5;
+    if (playerSkill < 80) return 3.0;
+    if (playerSkill < 90) return 3.5;
+    return 4.0;
+}
+
+function getAdaptiveLevelName(level) {
+    const names = {
+        1.0: "Anfänger",
+        1.5: "Anfänger+",
+        2.0: "Hobbyspieler",
+        2.5: "Hobbyspieler+",
+        3.0: "Vereinsspieler",
+        3.5: "Vereinsspieler+",
+        4.0: "Meister",
+        6.0: "GODMODE"
+    };
+    return names[level] || "Meister";
 }
 
 function adapt(value) {
+	const skillFactor = playerSkill > 70? 0.6 : 1.0; // Ab Vereinsspieler+ bremst es
     switch (adaptSpeed) {
         case "slow": return value * 0.5;
         case "normal": return value;
         case "fast": return value * 1.5;
         case "veryfast": return value * 2.0;
     }
-}
-
-function getAdaptiveLevelName(level) {
-    return ["Anfänger", "Hobbyspieler", "Vereinsspieler", "Meister"][level - 1];
 }
 
 /* ⭐ Fehlerquote */
@@ -137,10 +153,14 @@ function applyAdaptiveError(index) {
 function botPreview() {
     if (botLevel === 5) {
         const adaptiveLevel = getAdaptiveLevel();
-        if (adaptiveLevel === 1) return botRandom();
-        if (adaptiveLevel === 2) return botMedium();
-        if (adaptiveLevel === 3) return botHard();
-        if (adaptiveLevel === 4) return botPerfect();
+        if (adaptiveLevel === 1.0) return botRandom();
+        if (adaptiveLevel === 1.5) return botL1_5();
+        if (adaptiveLevel === 2.0) return botMedium();
+        if (adaptiveLevel === 2.5) return botL2_5();
+        if (adaptiveLevel === 3.0) return botHard();
+        if (adaptiveLevel === 3.5) return botL3_5();
+        if (adaptiveLevel === 4.0) return botPerfect();
+        if (adaptiveLevel === 6.0) return botGodmode();
     }
     if (botLevel === 1) return botRandom();
     if (botLevel === 2) return botMedium();
@@ -363,6 +383,12 @@ function botRandom() {
         const badMoves = free.filter(i =>![0,2,4,6,8].includes(i));
         if(badMoves.length > 0) return badMoves[Math.floor(Math.random() * badMoves.length)];
     }
+	
+    // 30% spielt "menschlich": bevorzugt Ecken
+    if(Math.random() < 0.3) {
+        const corners = [0,2,6,8].filter(i => cells[i] === null);
+        if(corners.length > 0) return corners[Math.floor(Math.random() * corners.length)];
+    }
     return free[Math.floor(Math.random() * free.length)];
 }
 
@@ -370,6 +396,9 @@ function botRandom() {
 function botMedium() {
     const habitStrength = 0.6;
 
+    // 20% spielt Mitte wenn frei - sehr menschlich
+    if(cells[4] === null && Math.random() < 0.2) return 4;
+	
     // 60% blockt Top-2 Lieblingsfelder
     if(Math.random() < habitStrength) {
         const favs = getTopFavoriteCells(2);
@@ -478,12 +507,15 @@ function botPerfect() { // L4 Schwer
         if(fork!== undefined) return fork;
     }
 
-    // 3% Patzer nur bei sicheren Zügen
-    if(Math.random() < 0.03) {
+    // NEU: Menschliche Patzer - auch mal wichtiges übersehen
+    const isImportantMove = win!== null || block!== null;
+    const patzerChance = isImportantMove? 0.01 : 0.05; // 1% bei Gewinn/Block, 5% sonst
+
+    if(Math.random() < patzerChance) {
         const safeMoves = getFreeCells().filter(i => {
             const testCells = [...cells];
             testCells[i] = "O";
-            return findCritical("X", testCells) === null;
+            return findCritical("X", testCells) === null; // nur sichere Patzer
         });
         const free = safeMoves.length > 0? safeMoves : getFreeCells();
         return free[Math.floor(Math.random() * free.length)];
@@ -494,14 +526,61 @@ function botPerfect() { // L4 Schwer
     return bestMoves[0];
 }
 
+/* Bot Level 1.5: Mix L1/L2 */
+function botL1_5() {
+    return Math.random() < 0.5? botRandom() : botMedium();
+}
+
+/* Bot Level 2.5: Mix L2/L3 */
+function botL2_5() {
+    return Math.random() < 0.5? botMedium() : botHard();
+}
+
+/* Bot Level 3.5: Mix L3/L4 */
+function botL3_5() {
+    return Math.random() < 0.5? botHard() : botPerfect();
+}
+
+/* Bot Level 6: VERSTECKT - Perfekt */
+function botGodmode() {
+    // 1. GEWINNEN IMMER
+    const win = findCritical("O");
+    if(win!== null) return win;
+    // 2. BLOCKEN IMMER
+    const block = findCritical("X");
+    if(block!== null) return block;
+    // 3. T2 Eröffnung
+    const movesMade = cells.filter(c => c!== null).length;
+    if(movesMade < 2) {
+        const opening = getPerfectOpening();
+        if(opening!== null) return opening;
+    }
+    // 4. T1 Gabel
+    const free = getFreeCells();
+    const fork = free.find(i => wouldFork(cells, "O", i));
+    if(fork!== undefined) return fork;
+    // 5. T3 Gegen-Gabel
+    const antiFork = free.find(i => wouldFork(cells, "X", i));
+    if(antiFork!== undefined) return antiFork;
+    // 6. 100% Minimax - KEIN Patzer
+    const bestMoves = getBestMovesFromMinimax(cells, "O");
+    return bestMoves[0];
+}
+
 /* Bot Level 5: Adaptive */
 function botAdaptive() {
     const adaptiveLevel = getAdaptiveLevel();
     let moveIndex;
-    if (adaptiveLevel === 1) moveIndex = botRandom();
-    if (adaptiveLevel === 2) moveIndex = botMedium();
-    if (adaptiveLevel === 3) moveIndex = botHard();
-    if (adaptiveLevel === 4) moveIndex = botPerfect();
+
+    if (adaptiveLevel === 6.0) moveIndex = botGodmode(); // VERSTECKT
+    else if (adaptiveLevel === 1.0) moveIndex = botRandom();
+    else if (adaptiveLevel === 1.5) moveIndex = botL1_5();
+    else if (adaptiveLevel === 2.0) moveIndex = botMedium();
+    else if (adaptiveLevel === 2.5) moveIndex = botL2_5();
+    else if (adaptiveLevel === 3.0) moveIndex = botHard();
+    else if (adaptiveLevel === 3.5) moveIndex = botL3_5();
+    else moveIndex = botPerfect(); // 4.0
+
     return applyAdaptiveError(moveIndex);
 }
 
@@ -603,9 +682,13 @@ function endRound(winner, winRow = null) {
 
     startingPlayer = startingPlayer === "X"? "O" : "X";
 
-    if (winner!== "draw") {
-        if (winner === "X") playerSkill += adapt(10);
-        if (winner === "O") playerSkill -= adapt(10);
+if (winner!== "draw") {
+        if (winner === "X") {
+            playerSkill += adapt(10); // Steigen geht normal
+        }
+        if (winner === "O") {
+            playerSkill -= adapt(10) * 0.7; // Fallen geht 30% langsamer = weniger Frust
+        }
     } else {
         playerSkill += adapt(2);
     }
